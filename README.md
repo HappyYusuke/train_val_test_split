@@ -1,5 +1,5 @@
 # train_val_test_split
-本リポジトリは、データセットをTRAIN、VAL、TESTに分割します。
+本リポジトリは、データセットを`TRAIN`、`VAL`、`TEST`に分割します。
 
 <br>
 
