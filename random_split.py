@@ -1,166 +1,140 @@
 import os
+import glob
 import random
 import shutil
 import argparse
 from tqdm import tqdm
-# 'data_augmentator' は Augmentator クラスが定義されているファイル名と仮定
-from data_augmentator import Augmentator 
 
 # --- コマンドライン引数の設定 ---
-parser = argparse.ArgumentParser(description="Split dataset into train, val, and test sets.")
-parser.add_argument("-i", "--images", type=str, required=True, help="Your images dir path.")
-parser.add_argument("-l", "--labels", type=str, required=True, help="Your labels dir path.")
-parser.add_argument("-s", "--savename", type=str, default="split_result", help="Save dir name. (Default: split_result)")
+parser = argparse.ArgumentParser(description="Split dataset into train, val, and test sets (Standalone).")
+parser.add_argument("-i", "--images", type=str, required=True, help="Path to source images directory.")
+parser.add_argument("-l", "--labels", type=str, required=True, help="Path to source labels directory.")
+parser.add_argument("-s", "--savename", type=str, default="split_result", help="Save directory name. (Default: split_result)")
+
+# 分割比率の一括指定
 parser.add_argument(
-    "-r",
     "--ratio",
     type=int,
-    nargs=3,  # 3つの引数を受け取る
-    default=[16, 4, 5],  # デフォルト値
-    metavar=('TRAIN', 'VAL', 'TEST'), # help表示用
+    nargs=3,
+    default=[16, 4, 5],
+    metavar=('TRAIN', 'VAL', 'TEST'),
     help="Ratio for train, val, and test data. (Default: 16 4 5)"
 )
 
 args = parser.parse_args()
 
-# --- パスと比率の設定 ---
+# --- パスと設定 ---
 IMAGES_PATH = args.images
 LABELS_PATH = args.labels
 save_dir = args.savename
 
-# 引数からrateディクショナリを作成
-rate = {
-    'train': args.ratio[0],
-    'val': args.ratio[1],
-    'test': args.ratio[2]
-}
+# 比率計算
+rate = {'train': args.ratio[0], 'val': args.ratio[1], 'test': args.ratio[2]}
 total_rate = sum(rate.values())
 
-# 0除算を防ぐ
 if total_rate == 0:
     print("Error: Total ratio cannot be zero.")
     exit(1)
 
-# ユーザーに設定された比率を表示
-print(f"Splitting dataset using ratio (Train:Val:Test) = {rate['train']}:{rate['val']}:{rate['test']}")
-print(f"Source Images: {IMAGES_PATH}")
-print(f"Source Labels: {LABELS_PATH}")
-print(f"Destination: {save_dir}")
+print(f"Splitting ratio (Train:Val:Test) = {rate['train']}:{rate['val']}:{rate['test']}")
 
-# --- Augmentatorの初期化とファイルリストの取得 ---
-try:
-    a = Augmentator(images_path=IMAGES_PATH, labels_path=LABELS_PATH)
-    image_paths = a.get_images_path()
-    label_paths = a.get_labels_path()
-except Exception as e:
-    print(f"Error initializing Augmentator or getting file paths: {e}")
-    print("Please ensure 'data_augmentator.py' exists and paths are correct.")
-    exit(1)
+# --- ファイル取得ロジック (Augmentatorの代わり) ---
+print("Scanning files...")
 
-# データの整合性チェック
-if len(image_paths) != len(label_paths):
-    print(f"Warning: Image count ({len(image_paths)}) and label count ({len(label_paths)}) do not match.")
+# 1. 全ファイルのパスを取得 (隠しファイルは除外)
+# os.listdirを使ってファイル名を取得し、拡張子を除いた「ステム（幹）」をキーにする
+def get_file_map(directory):
+    file_map = {}
+    if not os.path.exists(directory):
+        print(f"Error: Directory not found: {directory}")
+        return {}
+    
+    for filename in os.listdir(directory):
+        if filename.startswith('.'): continue # 隠しファイルスキップ
+        
+        # フルパス
+        full_path = os.path.join(directory, filename)
+        if os.path.isfile(full_path):
+            # 拡張子を除いた名前を取得 (例: 'image_01.jpg' -> 'image_01')
+            stem = os.path.splitext(filename)[0]
+            # 同じ名前のファイルが重複している場合は警告（例: .jpgと.pngが混在）
+            if stem in file_map:
+                print(f"Warning: Duplicate filename stem found: {stem} (keeping {file_map[stem]})")
+            else:
+                file_map[stem] = filename # ファイル名を保存
+    return file_map
 
-if not label_paths:
-    print("Error: No labels found. Exiting.")
-    exit(1)
+image_map = get_file_map(IMAGES_PATH)
+label_map = get_file_map(LABELS_PATH)
 
-# 拡張子の取得 (最初のファイルから取得)
-try:
-    _, image_dot = a.get_file_name(image_paths[0])
-    _, label_dot = a.get_file_name(label_paths[0])
-except IndexError:
-    print("Error: Could not get file extensions, file lists might be empty.")
+# 2. 画像とラベルの両方が存在するペアだけを抽出 (積集合)
+common_stems = list(set(image_map.keys()) & set(label_map.keys()))
+
+# ソートして順序を固定（再現性のため）
+common_stems.sort()
+
+data_num = len(common_stems)
+print(f"Found {len(image_map)} images and {len(label_map)} labels.")
+print(f"Valid pairs (Both exist): {data_num}")
+
+if data_num == 0:
+    print("Error: No matched image-label pairs found.")
     exit(1)
 
 # --- ディレクトリ作成 ---
 def dir_check(path):
-    """指定されたパスが存在しない場合、ディレクトリを作成します。"""
     if not os.path.exists(path):
         os.makedirs(path)
-        print(f"Created directory: {path}")
 
-# 保存先のパス定義
 dirs = {
     'train': (os.path.join(save_dir, "images/train/"), os.path.join(save_dir, "labels/train/")),
     'val':   (os.path.join(save_dir, "images/val/"),   os.path.join(save_dir, "labels/val/")),
     'test':  (os.path.join(save_dir, "images/test/"),  os.path.join(save_dir, "labels/test/"))
 }
 
-# ディレクトリの作成
 for img_dir, lbl_dir in dirs.values():
     dir_check(img_dir)
     dir_check(lbl_dir)
 
-# --- 分割ロジック ---
-# 全データのインデックスリストを作成 [0, 1, 2, ... n-1]
-data_indices = list(range(len(label_paths)))
-# ランダムにシャッフル
-random.shuffle(data_indices)
+# --- シャッフルと分割 ---
+random.shuffle(common_stems)
 
-# 分割位置の計算
-total_files = len(data_indices)
-train_end = int(total_files * (rate['train'] / total_rate))
-# valの終点は、trainの数 + valの数
-val_end = train_end + int(total_files * (rate['val'] / total_rate))
+train_end = int(data_num * (rate['train'] / total_rate))
+val_end = train_end + int(data_num * (rate['val'] / total_rate))
 
-# インデックスをスライスで分割
 indices_split = {
-    'train': data_indices[:train_end],
-    'val':   data_indices[train_end:val_end],
-    'test':  data_indices[val_end:] # 残りすべてをtestに
+    'train': common_stems[:train_end],
+    'val':   common_stems[train_end:val_end],
+    'test':  common_stems[val_end:]
 }
 
-# --- コピー処理実行 ---
+# --- コピー実行 ---
 total_cnt = 0
-missing_files = 0
 
 for phase in ['train', 'val', 'test']:
-    print(f"--- Processing {phase.capitalize()} data ---")
-    
-    current_indices = indices_split[phase]
-    if not current_indices:
-        print(f"No files allocated for {phase} (Ratio might be too small or total files too few).")
+    stems = indices_split[phase]
+    if not stems:
         continue
         
+    print(f"Processing {phase} data...")
     save_img_dir, save_lbl_dir = dirs[phase]
     
-    for index in tqdm(current_indices, desc=f"Copying {phase} files"):
-        try:
-            # ラベルパスを取得
-            src_lbl_path = label_paths[index]
-            file_name = os.path.splitext(os.path.basename(src_lbl_path))[0]
-            
-            # 対応する画像パスを構築
-            src_img_path = os.path.join(IMAGES_PATH, file_name + image_dot)
-            
-            # コピー先パス
-            dst_img_path = os.path.join(save_img_dir, file_name + image_dot)
-            dst_lbl_path = os.path.join(save_lbl_dir, file_name + label_dot)
-            
-            # ファイルが存在するか確認してからコピー
-            if os.path.exists(src_img_path) and os.path.exists(src_lbl_path):
-                shutil.copy(src_img_path, dst_img_path)
-                shutil.copy(src_lbl_path, dst_lbl_path)
-            else:
-                if not os.path.exists(src_img_path):
-                    print(f"\nWarning: Missing image file {src_img_path} (Label: {src_lbl_path})")
-                if not os.path.exists(src_lbl_path):
-                    print(f"\nWarning: Missing label file {src_lbl_path} (Image: {src_img_path})")
-                missing_files += 1
+    for stem in tqdm(stems):
+        # 元のファイル名を取得
+        img_filename = image_map[stem]
+        lbl_filename = label_map[stem]
+        
+        src_img = os.path.join(IMAGES_PATH, img_filename)
+        src_lbl = os.path.join(LABELS_PATH, lbl_filename)
+        
+        dst_img = os.path.join(save_img_dir, img_filename)
+        dst_lbl = os.path.join(save_lbl_dir, lbl_filename)
+        
+        shutil.copy(src_img, dst_img)
+        shutil.copy(src_lbl, dst_lbl)
 
-        except Exception as e:
-            print(f"\nError copying file at index {index}: {e}")
+    total_cnt += len(stems)
 
-    print(f"{phase.capitalize()} count: {len(current_indices)}")
-    total_cnt += len(current_indices)
-
-# --- 最終結果の表示 ---
-print("\n--- All Completed! ---")
-print(f"Train data: {len(indices_split['train'])}")
-print(f"Val data:   {len(indices_split['val'])}")
-print(f"Test data:  {len(indices_split['test'])}")
+print("\nAll Completed!")
 print(f"Total processed: {total_cnt}")
-
-if missing_files > 0:
-    print(f"\nWarning: {missing_files} files were missing and skipped.")
+print(f"Train: {len(indices_split['train'])}, Val: {len(indices_split['val'])}, Test: {len(indices_split['test'])}")
