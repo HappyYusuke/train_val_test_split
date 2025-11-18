@@ -39,8 +39,8 @@ your_dataset 👉 親ディレクトリ
 | --- | --- | --- |
 | `-i`or`--images` | - | 学習データまでのパス |
 | `-l`or`--labels` | - | ラベルデータまでのパス |
-| `-s`or`--savename` | `split_result` | 保存するディレクトリ名 (パスを指定することも可能です) |
-| `-r`or`--ratio` | `16 4 5` | `TRAIN`, `VAL`, `TEST`の比率 (`0`にすることも可能です) |
+| `-s`or`--savename` | `split_result` | 保存するディレクトリ名 (パスも可) |
+| `-r`or`--ratio` | `16 4 5` | `TRAIN`, `VAL`, `TEST`の比率 (`0`も可) |
 
 引数を指定して`random_split.py`を実行。
 ```bash
