@@ -13,7 +13,7 @@ parser.add_argument("-s", "--savename", type=str, default="split_result", help="
 
 # 分割比率の一括指定
 parser.add_argument(
-    "--ratio",
+    "-r", "--ratio",
     type=int,
     nargs=3,
     default=[16, 4, 5],
